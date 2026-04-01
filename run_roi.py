@@ -11,7 +11,7 @@ from shapely.geometry import Polygon
 # ─────────────────────────────────────────────
 # Segmentation mode: 'threshold', 'otsu', 'skin'
 # ─────────────────────────────────────────────
-SEG_MODE = 'threshold'
+SEG_MODE = 'otsu'
 
 # Parameters for threshold mode
 THRESHOLD_SEG = 90
