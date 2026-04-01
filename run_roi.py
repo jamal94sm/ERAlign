@@ -278,7 +278,8 @@ class GetROI(PalmBasic):
 
         finger_lines = []
         
-        mask = np.array([cv2.pointPolygonTest(hull_contour_coord_small[:,0,:], tuple(pt), measureDist=True) > 0.5 for pt in palm_contour])
+        #mask = np.array([cv2.pointPolygonTest(hull_contour_coord_small[:,0,:], tuple(pt), measureDist=True) > 0.5 for pt in palm_contour])
+        mask = np.array([cv2.pointPolygonTest(hull_contour_coord_small[:,0,:].astype(np.float32), (float(pt[0]), float(pt[1])), measureDist=True) > 0.5 for pt in palm_contour])
         transitions = np.where(mask[:-1] != mask[1:])[0] + 1
 
         if mask[0]:
