@@ -574,13 +574,61 @@ def run_rotated_vis(dst_root_dir,dir_gray_files,kp_dir):
             cv2.imwrite(os.path.join(all_full_dir_paths['illu'][2], filename), show_img)
         
     print(np.sum(iou_list)/idx)
-                  
+
+
+
+
+###########################################################
+def run_extraction(dir_source, dir_output):
+    import os
+    os.makedirs(dir_output, exist_ok=True)
+    filenames = sorted(os.listdir(dir_source))
+
+    success, failed = 0, 0
+    for idx, filename in enumerate(filenames):
+        img_path = os.path.join(dir_source, filename)
+        gray_img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+
+        if gray_img is None:
+            print(f"{idx}: Skipped {filename}")
+            continue
+
+        try:
+            get_roi = GetROI(gray_img, ratio_rotate=1, ratio=1)
+            get_roi.run_rotate()
+
+            get_roi.norm_img = get_roi.rotate_image(get_roi.ori_img, get_roi.rotation_angle)
+            height, width = get_roi.norm_img.shape[:2]
+            get_roi.cut_norm_img = get_roi.norm_img[0:height, 0:int(width/4*3)]
+
+            bool_result = get_roi.run_localization()
+
+            if bool_result:
+                kk_pred = np.array(get_roi.keypoints_localization)
+                kk_pred_transformed = get_roi.rotate_keypoints(
+                    get_roi.norm_img, -get_roi.rotation_angle, kk_pred
+                )
+                roi_pred, _, _ = extract_roi(
+                    kk_pred_transformed[0], kk_pred_transformed[1],
+                    gray_img, color=[0, 0, 255], thickness=2
+                )
+                cv2.imwrite(os.path.join(dir_output, filename), roi_pred)
+                print(f"{idx}: Saved -> {filename}")
+                success += 1
+            else:
+                print(f"{idx}: Failed (localization) -> {filename}")
+                failed += 1
+
+        except Exception as e:
+            print(f"{idx}: Error -> {filename}: {e}")
+            failed += 1
+
+    print(f"\nDone. Success: {success}, Failed: {failed}")
+
+
 if __name__ == '__main__':
-    src_dir =  '/home/zdp/Dataset/results_roi_pami_new/cuhk12000_pros/rotated/'
-    dst_dir = '/home/zdp/Dataset/results_roi_pami_new/cuhk12000_pros/rotated/'
-    
-    dir_gray_files = os.path.join(src_dir,'palm_ori')
-    kp_dir = os.path.join(src_dir,'keypoint_label')
-    run_rotated_vis(dst_dir,dir_gray_files,kp_dir)
+    dir_source = '/mnt/data/FingerprintDatasets/Combined/combineddataset/CASIA_Multi_Spectral_Palmprint_V1'
+    dir_output = '/home/pai-ng/Jamal/NIPS2026/ROI_Extraction/CASIA-MS_ROI_ERAlign'
+    run_extraction(dir_source, dir_output)
             
 
