@@ -10,6 +10,32 @@ class PalmBasic:
     def __init__(self):
         pass
 
+    def segment_hand(self, img, mode='threshold', threshold_val=90,
+                     otsu_blur=True, otsu_blur_sigma=1.0,
+                     skin_h_min=0, skin_h_max=20,
+                     skin_s_min=20, skin_s_max=255,
+                     skin_v_min=70, skin_v_max=255,
+                     skin_morph_kernel=(5, 5)):
+        if mode == 'threshold':
+            _, binary = cv2.threshold(img, threshold_val, 255, cv2.THRESH_BINARY)
+        elif mode == 'otsu':
+            if otsu_blur:
+                img = cv2.GaussianBlur(img, (5, 5), otsu_blur_sigma)
+            _, binary = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        elif mode == 'skin':
+            img_bgr = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+            mask = cv2.inRange(hsv,
+                               (skin_h_min, skin_s_min, skin_v_min),
+                               (skin_h_max, skin_s_max, skin_v_max))
+            kernel = np.ones(skin_morph_kernel, np.uint8)
+            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+            _, binary = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            binary = cv2.bitwise_and(binary, binary, mask=mask)
+        else:
+            raise ValueError(f"Unknown seg_mode '{mode}'. Choose 'threshold', 'otsu', or 'skin'")
+        return binary
+
     def gaussian_blur(self, img, kernel_size=(5, 5), sigma=2, blur=True):
         if blur:
             return cv2.GaussianBlur(img, kernel_size, sigma)
@@ -82,43 +108,27 @@ class PalmBasic:
         return skeleton
     
     def euclidean_distance(self, point1, point2):
-        # 将点转换为 numpy 向量
         point1 = np.array(point1)
         point2 = np.array(point2)
-
-        # 计算两点之间的差
         difference = point1 - point2
-
-        # 计算差的平方
         squared_difference = np.square(difference)
-
-        # 计算所有差的平方的总和
         sum_of_squared_difference = np.sum(squared_difference)
-
-        # 对总和开根号，得到欧氏距离
         distance = np.sqrt(sum_of_squared_difference)
-
         return distance
     
     def find_closest_path_graph(self,matrix):
 
         cleaned_matrix = np.zeros_like(matrix)
         
-        #创建图的时间
-        # start_time = time.time()
         graph = self.build_undirected_graph(matrix)
-        # end_time = time.time()
-        # execution_time = end_time - start_time
-        # print("Build graph time: {:.4f} seconds".format(execution_time))
         
         nodes_with_degree_1 = [node for node in graph.nodes() if graph.degree[node] == 1]
         
         leftmost_node = None
         min_x = float('inf')
 
-        # Traverse the nodes with degree 1 and find the leftmost node
         for node in nodes_with_degree_1:
-            x = node[1]  # Assuming (x, y) format for node coordinates
+            x = node[1]
 
             if x < min_x:
                 min_x = x
@@ -126,10 +136,8 @@ class PalmBasic:
         source_node = leftmost_node
         
         longest_shortest_path = []
-        # Traverse all other nodes in nodes_with_degree_1
         for node in nodes_with_degree_1:
             if node != source_node:
-                # Find the shortest path between the source and current node
                 shortest_path = nx.shortest_path(graph, source=source_node, target=node)
                 if len(shortest_path) > len(longest_shortest_path):
                     longest_shortest_path = shortest_path
@@ -137,32 +145,25 @@ class PalmBasic:
         for point in longest_shortest_path:
             cleaned_matrix[point[0],point[1]]=255
         
-        
         return [cleaned_matrix,longest_shortest_path]
     
     def build_undirected_graph(self,matrix):
-        # rows, cols = matrix.shape
 
-        # Find non-zero (255) elements
         non_zero_elements = np.argwhere(matrix == 255)
 
-        # Find min and max row and column
         min_row, min_col = np.min(non_zero_elements, axis=0)
         max_row, max_col = np.max(non_zero_elements, axis=0)
 
         graph = nx.Graph()
 
-        # Directions for neighbors (left, upper left, up, upper right)
         directions = [(-1, 0), (-1, -1), (0, -1), (1, -1)]
 
-        # Traverse only the confined area
         for i in range(min_row, max_row + 1):
             for j in range(min_col, max_col + 1):
                 if matrix[i, j] == 255:
                     current_node = (i, j)
                     graph.add_node(current_node)
 
-                    # Check part of the neighboring points
                     for direction in directions:
                         neighbor = (i + direction[0], j + direction[1])
 
@@ -174,14 +175,8 @@ class PalmBasic:
 
     def judge_valley(self,path):
     
-        # points = np.argwhere(matrix == 255)
-
-        # # Find the left-most and right-most points
-        # rightmost = max(points, key=lambda p: p[1])
-        
         rightmost_node = max(path, key=lambda node: node[1])
 
-        # Find the index of the leftmost node in the longest shortest path
         rightmost_index = path.index(rightmost_node)
         
         nodes_between1 = path[rightmost_index + 1:] 
@@ -277,17 +272,7 @@ class PalmBasic:
         return angle_degrees
 
     def find_closest_white_point(self, image, point):
-        # Get all the non-zero (i.e., 255) points in the binary image
         non_zero_points = cv2.findNonZero(image)
-
-        # Compute the Euclidean distances from the given point to all non-zero points
         distances = np.linalg.norm(non_zero_points - point, axis=2)
-
-        # Get the index of the minimum distance
         min_index = np.argmin(distances)
-
-        # Return the closest non-zero point
-        return tuple(non_zero_points[min_index][0]),distances[min_index][0]  
- 
- 
-   
+        return tuple(non_zero_points[min_index][0]),distances[min_index][0]
