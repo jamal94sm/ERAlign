@@ -8,27 +8,47 @@ from PalmBasic import PalmBasic
 from shapely.geometry import Polygon
 
 
-# Setting for CUHK
-THRESHOLD_SEG = 90 
-THRESHOLD_EDGE = 10 
+# ─────────────────────────────────────────────
+# Segmentation mode: 'threshold', 'otsu', 'skin'
+# ─────────────────────────────────────────────
+SEG_MODE = 'threshold'
+
+# Parameters for threshold mode
+THRESHOLD_SEG = 90
+THRESHOLD_SEG_ROTATE = 90
+
+# Parameters for otsu mode
+OTSU_BLUR = True
+OTSU_BLUR_SIGMA = 1.0
+
+# Parameters for skin mode (HSV ranges)
+SKIN_H_MIN, SKIN_H_MAX = 0, 20
+SKIN_S_MIN, SKIN_S_MAX = 20, 255
+SKIN_V_MIN, SKIN_V_MAX = 70, 255
+SKIN_MORPH_KERNEL = (5, 5)
+
+# ─────────────────────────────────────────────
+# Original settings (unchanged)
+# ─────────────────────────────────────────────
+THRESHOLD_EDGE = 10
 BI_THRESHOLD_SEG = True
 BI_THRESHOLD_ROI_CHECK = True
 BLUR = False
-BLUR_SIGMA = 0.05 
+BLUR_SIGMA = 0.05
 KERNEL_SIZE = (15, 15)
 
 BLUR_ROTATE = True
-BLUR_SIGMA_ROTATE = 0.05 
+BLUR_SIGMA_ROTATE = 0.05
 BI_THRESHOLD_SEG_ROTATE = False
-THRESHOLD_SEG_ROTATE = 90 
 
 pad = 0
+
+
 def extract_roi(p1, p2, img, color, thickness):
     
     # Calculate the distance between p1 and p2
     d = np.linalg.norm(p2 - p1)
     
-
     direction = (p2 - p1) / (d+0.000001) 
     normal = np.array([direction[1], -direction[0]])
     
@@ -65,11 +85,11 @@ def extract_roi(p1, p2, img, color, thickness):
     # Draw the square in blue color
     cv2.polylines(img_padded, [np.array([C, D, E, F])], isClosed=True, color=color, thickness=thickness)
     
-    
     corner_points = [(C[0],C[1]), (D[0],D[1]), (E[0],E[1]), (F[0],F[1])]
     
     return warped, corner_points, img_padded
     
+
 def calculate_iou_from_points(corners_a, corners_b):
     poly_a = Polygon(corners_a)
     poly_b = Polygon(corners_b)
@@ -89,9 +109,10 @@ def calculate_iou_from_points(corners_a, corners_b):
 
 class GetROI(PalmBasic):
     
-    def __init__(self, img, ratio_rotate=2.0, ratio=1.0):
+    def __init__(self, img, ratio_rotate=2.0, ratio=1.0, seg_mode='threshold'):
         self.ratio_rotate = ratio_rotate
         self.ratio = ratio
+        self.seg_mode = seg_mode
         self.ori_img = img
         self.w, self.h = img.shape
         self.w_rotate, self.h_rotate = int(self.w/ratio_rotate), int(self.h/ratio_rotate)
@@ -100,9 +121,15 @@ class GetROI(PalmBasic):
         img = self.resize_image(self.ori_img, self.ratio_rotate)
         gabors = self._get_gabor_filters()
         
-        img_blurred = self.gaussian_blur(img, sigma=BLUR_SIGMA_ROTATE, blur=BLUR_ROTATE) #0.05
+        img_blurred = self.gaussian_blur(img, sigma=BLUR_SIGMA_ROTATE, blur=BLUR_ROTATE)
         
-        rough_binary = self.threshold_image(img_blurred, threshold_val=THRESHOLD_SEG_ROTATE, bi_threshold=BI_THRESHOLD_SEG_ROTATE)
+        rough_binary = self.segment_hand(img_blurred, mode=self.seg_mode,
+                                         threshold_val=THRESHOLD_SEG_ROTATE,
+                                         otsu_blur=OTSU_BLUR, otsu_blur_sigma=OTSU_BLUR_SIGMA,
+                                         skin_h_min=SKIN_H_MIN, skin_h_max=SKIN_H_MAX,
+                                         skin_s_min=SKIN_S_MIN, skin_s_max=SKIN_S_MAX,
+                                         skin_v_min=SKIN_V_MIN, skin_v_max=SKIN_V_MAX,
+                                         skin_morph_kernel=SKIN_MORPH_KERNEL)
         
         max_comp_img, max_comp_contour_coord, max_comp_contour_img = self.find_largest_component(rough_binary)
         
@@ -114,7 +141,6 @@ class GetROI(PalmBasic):
         
         palm_edges_labels, palm_edges_sorted_indices = self._select_rough_palm(edges_hull_img)
         
-        
         self.rotation_angle = self.compute_rough_orientation(palm_edges_labels, palm_edges_sorted_indices, hull_img, gabors)
         
         self.norm_img = self.rotate_image(self.ori_img, self.rotation_angle)
@@ -125,16 +151,21 @@ class GetROI(PalmBasic):
     def run_localization(self):
         img = self.cut_norm_img
         self.w, self.h = img.shape
-        img_blurred = self.gaussian_blur(img, sigma=BLUR_SIGMA, blur=BLUR) #0.05
+        img_blurred = self.gaussian_blur(img, sigma=BLUR_SIGMA, blur=BLUR)
         
-        rough_binary = self.threshold_image(img_blurred, threshold_val=THRESHOLD_SEG, bi_threshold=BI_THRESHOLD_SEG)
+        rough_binary = self.segment_hand(img_blurred, mode=self.seg_mode,
+                                         threshold_val=THRESHOLD_SEG,
+                                         otsu_blur=OTSU_BLUR, otsu_blur_sigma=OTSU_BLUR_SIGMA,
+                                         skin_h_min=SKIN_H_MIN, skin_h_max=SKIN_H_MAX,
+                                         skin_s_min=SKIN_S_MIN, skin_s_max=SKIN_S_MAX,
+                                         skin_v_min=SKIN_V_MIN, skin_v_max=SKIN_V_MAX,
+                                         skin_morph_kernel=SKIN_MORPH_KERNEL)
         
         max_comp_img, max_comp_contour_coord, max_comp_contour_img = self.find_largest_component(rough_binary)
         
         max_comp_img_small = self.erode_binary_image(max_comp_img, kernel_size=KERNEL_SIZE)
         max_comp_contour_coord_small = self.find_contour(max_comp_img_small)
         max_comp_contour_img_small = self.fill_contour(img, max_comp_contour_coord_small)
-        
         
         hull_coord, hull_img = self.hull_image(img, max_comp_contour_coord)
         
@@ -151,15 +182,12 @@ class GetROI(PalmBasic):
         palm_edges_labels, palm_edges_sorted_indices = self._select_rough_palm(edges_hull_img)
         
         palm_len = np.max(hull_coord[:,0,:][:,0]) - np.min(hull_coord[:,0,:][:,0])
-        
 
         self.finger_edges_img = self.process_palm_contour_rough(palm_edges_sorted_indices, palm_edges_labels, palm_len, hull_contour_img_small, concave_contour_img, max_comp_contour_img)
         
-        
         self.palm_contour_img, self.palm_contour_coord = self.find_inner_contour(self.finger_edges_img)
         
-        
-        self.finger_lines = self.find_concave_finger(hull_contour_coord_small,hull_contour_img_small, palm_len, np.max(hull_coord[:,0,:][:,0]), self.palm_contour_coord)
+        self.finger_lines = self.find_concave_finger(hull_contour_coord_small, hull_contour_img_small, palm_len, np.max(hull_coord[:,0,:][:,0]), self.palm_contour_coord)
         
         self.finger_lines_sorted = self.sort_and_surround_lines(self.finger_lines)
 
@@ -167,7 +195,7 @@ class GetROI(PalmBasic):
         
         self.show_img = cv2.cvtColor(np.copy(self.norm_img),cv2.COLOR_GRAY2BGR)
 
-        if  self.keypoints is None:
+        if self.keypoints is None:
             return False
         else:   
             for point in self.keypoints:
@@ -177,7 +205,7 @@ class GetROI(PalmBasic):
             self.keypoints = self.keypoints[sorted_indices]
             self.localize_keypoints(self.keypoints)
             
-            return  True
+            return True
             
         
     def localize_keypoints(self, keypoints):   
@@ -271,14 +299,12 @@ class GetROI(PalmBasic):
 
             new_point_sets.append(extracted_points)
 
-        
         return new_point_sets
         
-    def find_concave_finger(self,hull_contour_coord_small,hull_contour_img_small,palm_len, hull_coord_right, palm_contour):
+    def find_concave_finger(self, hull_contour_coord_small, hull_contour_img_small, palm_len, hull_coord_right, palm_contour):
 
         finger_lines = []
         
-        #mask = np.array([cv2.pointPolygonTest(hull_contour_coord_small[:,0,:], tuple(pt), measureDist=True) > 0.5 for pt in palm_contour])
         mask = np.array([cv2.pointPolygonTest(hull_contour_coord_small[:,0,:].astype(np.float32), (float(pt[0]), float(pt[1])), measureDist=True) > 0.5 for pt in palm_contour])
         transitions = np.where(mask[:-1] != mask[1:])[0] + 1
 
@@ -290,7 +316,6 @@ class GetROI(PalmBasic):
 
         # Group the transitions into segments and filter by size
         finger_lines_rough = [palm_contour[start:end] for start, end in zip(transitions[::2], transitions[1::2]) if end - start > 5]
-        
         
         finger_lines = []
         if len(finger_lines_rough)<=4:
@@ -315,9 +340,9 @@ class GetROI(PalmBasic):
                     else:
                         if hull_coord_right - right_most_finger_x > palm_len / 4:
                             finger_lines.append(finger_lines_rough[index])
-        return  finger_lines
+        return finger_lines
 
-    def find_inner_contour(self,finger_edges):
+    def find_inner_contour(self, finger_edges):
 
         contours_final, hierarchy = cv2.findContours(finger_edges, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
 
@@ -333,8 +358,7 @@ class GetROI(PalmBasic):
                 if hierarchy_idx[3] != -1 and contours_final[hierarchy_idx[3]] in top_contours:
                     parent_contour_exists  = True
             
-            # If the contour is one of the top-2 max contours and is the inner contour, select it
-            if parent_contour_exists :
+            if parent_contour_exists:
                 selected_contour = contour
             else:
                 selected_contour = top_contours[1]
@@ -381,8 +405,6 @@ class GetROI(PalmBasic):
         rotation_matrix_rough = cv2.getRotationMatrix2D(center_rotate, angle_degrees_rough, 1)
         edges_img_rough = cv2.warpAffine(edges_img, rotation_matrix_rough, (edges_img.shape[1], edges_img.shape[0]))
 
-        # edges_img_rough = cv2.resize(edges_img_rough, (self.h_rotate, self.w_rotate))
-
         results = np.zeros((12, edges_img_rough.shape[0], edges_img_rough.shape[1]))
         for jj, gabor in enumerate(gabors):
             result = cv2.filter2D(edges_img_rough.astype(np.float32), -1, gabor)
@@ -417,11 +439,11 @@ class GetROI(PalmBasic):
         return transformed_points
 
 
-    def process_palm_contour_rough(self,sorted_edges_indices,labels,len_palm,hull_contour_small,concave_contour_img,hull_contour):
+    def process_palm_contour_rough(self, sorted_edges_indices, labels, len_palm, hull_contour_small, concave_contour_img, hull_contour):
         
-        concave_hull = concave_contour_img |  hull_contour_small
+        concave_hull = concave_contour_img | hull_contour_small
         
-        finger_edges = concave_contour_img |  hull_contour_small
+        finger_edges = concave_contour_img | hull_contour_small
     
         th_removed = 6/self.ratio
         
@@ -455,7 +477,6 @@ class GetROI(PalmBasic):
                 left_dest = left_node[1] - np.min(left_hull_points[:,0,1])
                 
                 if left_dest >(len_palm/6):
-                    # th_edge_count=2
                     continue
                     
                 path_valid = self.find_farthest_point(results_graph[1],th_removed)
@@ -466,7 +487,6 @@ class GetROI(PalmBasic):
                 cv2.line(gray_edge_skele, closest_point, tuple(path_valid[0]), 255, thickness=1)
 
             else:
-                # rightmost = max(hull, key=lambda p: p[1])
                 dest_node = results_graph[1][-1]
                 src_node = results_graph[1][0]
                 dest_hull_points = hull_points[np.argwhere(hull_points[:,0]==dest_node[0])]
@@ -476,7 +496,6 @@ class GetROI(PalmBasic):
                 
                 dist_node = min(dist_dest,src_dest)
                 if dist_node>(len_palm/5):
-                    # th_edge_count=2
                     continue
                 
                 gray_edge_skele = results_graph[0].astype(np.uint8)
@@ -495,21 +514,20 @@ class GetROI(PalmBasic):
         
         return finger_edges
 
+
 def create_dirs(sub_dirs, parent_dir):
     full_dir_paths = []
 
     for sub_dir in sub_dirs:
-        # sub_dir_with_version = f"{sub_dir}{version}"
-
         full_dir_path = os.path.join(parent_dir, sub_dir)
         if not os.path.exists(full_dir_path):
             os.makedirs(full_dir_path) 
-
         full_dir_paths.append(full_dir_path)
 
     return full_dir_paths
 
-def run_rotated_vis(dst_root_dir,dir_gray_files,kp_dir):
+
+def run_rotated_vis(dst_root_dir, dir_gray_files, kp_dir):
     
     all_sub_dirs = {
         'illu': ['illustration_fail','illustration_suc','illustration_no'],
@@ -534,10 +552,8 @@ def run_rotated_vis(dst_root_dir,dir_gray_files,kp_dir):
         
         show_img = cv2.imread(img_path)
         
-        
-        get_roi = GetROI(gray_img, ratio_rotate=1, ratio=1)
+        get_roi = GetROI(gray_img, ratio_rotate=1, ratio=1, seg_mode=SEG_MODE)
         get_roi.run_rotate()
-        # get_roi.rotation_angle = 0
         
         get_roi.norm_img = get_roi.rotate_image(get_roi.ori_img, get_roi.rotation_angle)
         height, width = get_roi.norm_img.shape[:2]
@@ -562,12 +578,10 @@ def run_rotated_vis(dst_root_dir,dir_gray_files,kp_dir):
             if iou > 0.75:
                 cv2.imwrite(os.path.join(all_full_dir_paths['roi'][1], filename), roi_pred)
                 cv2.imwrite(os.path.join(all_full_dir_paths['illu'][1], filename), img_padded)
-
                 np.save(os.path.join(all_full_dir_paths['kp'][1], filename.split('.')[0]+'.npy'), kk_pred_transformed)
             else:
                 cv2.imwrite(os.path.join(all_full_dir_paths['roi'][0], filename), roi_pred)
                 cv2.imwrite(os.path.join(all_full_dir_paths['illu'][0], filename), img_padded)
-
                 np.save(os.path.join(all_full_dir_paths['kp'][0], filename.split('.')[0]+'.npy'), kk_pred_transformed)
             
         else:
@@ -577,11 +591,8 @@ def run_rotated_vis(dst_root_dir,dir_gray_files,kp_dir):
     print(np.sum(iou_list)/idx)
 
 
-
-
 ###########################################################
 def run_extraction(dir_source, dir_output):
-    import os
     os.makedirs(dir_output, exist_ok=True)
     filenames = sorted(os.listdir(dir_source))
 
@@ -595,7 +606,7 @@ def run_extraction(dir_source, dir_output):
             continue
 
         try:
-            get_roi = GetROI(gray_img, ratio_rotate=1, ratio=1)
+            get_roi = GetROI(gray_img, ratio_rotate=1, ratio=1, seg_mode=SEG_MODE)
             get_roi.run_rotate()
 
             get_roi.norm_img = get_roi.rotate_image(get_roi.ori_img, get_roi.rotation_angle)
@@ -631,5 +642,3 @@ if __name__ == '__main__':
     dir_source = '/mnt/data/FingerprintDatasets/Combined/combineddataset/CASIA_Multi_Spectral_Palmprint_V1'
     dir_output = '/home/pai-ng/Jamal/NIPS2026/ROI_Extraction/CASIA-MS_ROI_ERAlign'
     run_extraction(dir_source, dir_output)
-            
-
